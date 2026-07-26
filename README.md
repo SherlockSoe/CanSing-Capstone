@@ -10,6 +10,14 @@
    pip install -r requirements.txt
    ```
 
+   **macOS only:** `lightgbm` needs the OpenMP runtime, which isn't bundled
+   with the pip package. If you hit `Library not loaded: @rpath/libomp.dylib`,
+   run:
+
+   ```bash
+   brew install libomp
+   ```
+
 2. Install the `nbstripout` git filter (**one-time, per clone**). This strips
    notebook cell outputs/execution counts before they're committed, so two
    people editing the notebook don't generate noisy diffs or merge conflicts
@@ -34,7 +42,7 @@
 4. Launch the notebook:
 
    ```bash
-   jupyter notebook "notebooks/Capstone Notebook - Main.ipynb"
+   jupyter notebook notebooks/CapstoneNoteBookMain.ipynb
    ```
 
    File paths (`path1`, `path2`) resolve automatically to `data/raw/` — no
@@ -48,9 +56,9 @@
   and PR reviews only show real code changes, not re-run noise. Your working
   copy still shows outputs locally — only what gets committed is stripped.
 - **Review changes as plain Python.** The notebook is paired with
-  `notebooks/Capstone Notebook - Main.py` via `jupytext` (in percent-cell
+  `notebooks/CapstoneNoteBookMain.py` via `jupytext` (in percent-cell
   format). Both files are kept in sync automatically whenever you save the
-  notebook in Jupyter (or run `jupytext --sync "notebooks/Capstone Notebook - Main.ipynb"`
+  notebook in Jupyter (or run `jupytext --sync notebooks/CapstoneNoteBookMain.ipynb`
   from the CLI). The `.py` file is what's actually easy to diff and merge on
   GitHub — prefer resolving merge conflicts there, then run `jupytext --sync`
   to bring the `.ipynb` back in line.
