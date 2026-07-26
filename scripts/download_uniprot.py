@@ -3,7 +3,6 @@
 Streams the proteome from the UniProt REST API and saves it to data/raw/.
 """
 
-from datetime import date
 from pathlib import Path
 
 import requests
@@ -20,7 +19,7 @@ OUTPUT_DIR = REPO_ROOT / "data" / "raw"
 
 def download_uniprot_fasta(output_dir: Path = OUTPUT_DIR) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / f"uniprotkb_proteome_{PROTEOME_ID}_{date.today():%Y_%m_%d}.fasta"
+    output_path = output_dir / f"uniprotkb_proteome_{PROTEOME_ID}.fasta"
 
     print(f"Downloading {STREAM_URL} ...")
     response = requests.get(STREAM_URL, timeout=60)
