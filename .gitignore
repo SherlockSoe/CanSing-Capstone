@@ -1,0 +1,18 @@
+# Raw data (downloaded via scripts/, not committed — see README)
+data/raw/*
+!data/raw/.gitkeep
+
+# Generated artifacts
+*.pkl
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS
+.DS_Store

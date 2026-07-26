@@ -1,0 +1,12 @@
+requests
+pandas
+numpy
+scipy
+scikit-learn
+lightgbm
+xgboost
+shap
+matplotlib
+plotly
+biopython
+jupyter
