@@ -1,4 +1,5 @@
-"""Download the UniProt reference proteome FASTA for S. cerevisiae S288c (UP000002311).
+"""Download the UniProt reference proteome FASTA for S. cerevisiae S288c
+(UP000002311).
 
 Streams the proteome from the UniProt REST API and saves it to data/raw/.
 """

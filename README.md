@@ -66,6 +66,28 @@
   conflicts are still harder to resolve than plain-text ones even with the
   tooling above.
 
+## Code style
+
+The project's Python code — `scripts/*.py` and the notebook's `jupytext`
+mirror, `notebooks/CapstoneNoteBookMain.py` — is checked against PEP-8 with
+`flake8` (79-char line length, configured in `.flake8`). Before submitting or
+opening a PR, verify it's clean:
+
+```bash
+flake8 scripts/ notebooks/CapstoneNoteBookMain.py
+```
+
+No output means no violations. If you need to fix something, `ruff` (already
+in `requirements.txt`, configured in `ruff.toml`) auto-fixes most of it:
+
+```bash
+ruff format scripts/ notebooks/CapstoneNoteBookMain.py
+ruff check --fix scripts/ notebooks/CapstoneNoteBookMain.py
+```
+
+Then run `jupytext --sync notebooks/CapstoneNoteBookMain.ipynb` to carry the
+fixes from the `.py` mirror back into the notebook.
+
 ## Project structure
 
 ```

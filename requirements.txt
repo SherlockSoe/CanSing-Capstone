@@ -12,3 +12,5 @@ biopython
 jupyter
 jupytext
 nbstripout
+flake8
+ruff
