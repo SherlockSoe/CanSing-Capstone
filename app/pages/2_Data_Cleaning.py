@@ -1,8 +1,10 @@
 """Data Cleaning page: Sankey diagram of how proteins were filtered."""
 
+import json
 import sys
 from pathlib import Path
 
+import plotly.graph_objects as go
 import streamlit as st
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -16,10 +18,10 @@ st.set_page_config(page_title="PPI Prediction | Data Cleaning", page_icon="🧬"
 st.title("Data Cleaning")
 
 st.markdown(
-    "This page will show a Sankey diagram of how the 6,067 candidate "
-    "proteins were narrowed down — for example, limiting the allowable "
-    "overlap between protein sequences to mitigate data leakage during "
-    "training."
+    "The 6,067 candidate proteins are narrowed down by clustering "
+    "near-identical sequences with CD-HIT (40% identity threshold) and "
+    "keeping one representative per cluster — this limits how much "
+    "sequence overlap can leak across the train/test split used later."
 )
 
 if not CLEANING_SUMMARY_PATH.exists():
@@ -30,7 +32,24 @@ if not CLEANING_SUMMARY_PATH.exists():
     )
     st.stop()
 
-st.warning(
-    f"Found {CLEANING_SUMMARY_PATH.name}, but Sankey rendering isn't "
-    "implemented yet — add it here once the summary schema is finalized."
+with open(CLEANING_SUMMARY_PATH) as f:
+    summary = json.load(f)
+
+fig = go.Figure(
+    go.Sankey(
+        node=dict(label=summary["labels"], pad=20, thickness=20),
+        link=dict(
+            source=summary["source"],
+            target=summary["target"],
+            value=summary["value"],
+        ),
+    )
 )
+fig.update_layout(title="Protein filtering flow", font_size=12)
+st.plotly_chart(fig)
+
+n_all = summary["value"][0] + summary["value"][1]
+n_kept = summary["value"][0]
+col1, col2 = st.columns(2)
+col1.metric("Proteins before cleaning", f"{n_all:,}")
+col2.metric("Proteins kept", f"{n_kept:,}", f"-{n_all - n_kept:,}")

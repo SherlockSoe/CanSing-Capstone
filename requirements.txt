@@ -15,3 +15,5 @@ nbstripout
 flake8
 ruff
 streamlit
+torch
+transformers

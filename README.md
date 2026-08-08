@@ -18,6 +18,14 @@
    brew install libomp
    ```
 
+   The notebook's data-cleaning step (Section 2) also needs the `cd-hit`
+   binary, which isn't a pip package:
+
+   ```bash
+   brew tap brewsci/bio
+   brew install cd-hit
+   ```
+
 2. Install the `nbstripout` git filter (**one-time, per clone**). This strips
    notebook cell outputs/execution counts before they're committed, so two
    people editing the notebook don't generate noisy diffs or merge conflicts
@@ -49,11 +57,20 @@
    machine-specific editing needed, whether you launch Jupyter from the repo
    root or from `notebooks/`.
 
+   **Expect Section 3 (Create Embeddings) to take a while the first time**:
+   it downloads the ESM-2 650M-parameter model (~2.6 GB, one-time,
+   cached by `transformers` afterward) and then embeds every protein —
+   roughly 30-60 minutes on a laptop GPU (Apple Silicon MPS or CUDA); much
+   longer on CPU only. The resulting embeddings are cached to
+   `data/processed/embeddings.pkl`, so re-running the notebook after that
+   point is fast. Section 4 (Train the Model) trains 5 candidate models and
+   typically takes a few more minutes.
+
 ## Running the GUI
 
 The project includes a Streamlit app (`app/`) that presents the report's
-narrative, dataset stats, and (once the model pipeline is built out) results
-and an interactive predictor. Run it from the repo root:
+narrative, dataset stats, data-cleaning Sankey diagram, model comparison
+results, and an interactive predictor. Run it from the repo root:
 
 ```bash
 streamlit run app/Home.py
@@ -66,14 +83,18 @@ streamlit run app/Home.py
 - **Data Cleaning**, **Model Results**, **Predictor** — populate
   automatically once the notebook writes their backing artifacts
   (`data/processed/cleaning_summary.json`, `model_metrics.json`,
-  `model.pkl`); until then they show what's still needed. No app changes
-  are required when those become available — see the docstring at the top
-  of each page in `app/pages/` for the exact expected file/field names.
+  `model.pkl`, written by Sections 2, 5, and 5 respectively); until then
+  they show what's still needed. No app changes are required once those
+  exist — see the docstring at the top of each page in `app/pages/` for
+  the exact expected file/field names.
 
-Shared data-loading logic (`read_fasta`, `extract_gene_names`,
-`load_biogrid_interactions`, `extract_locuslink`, `get_interactors`) lives
-in `src/ppi_utils.py` and is imported by both the notebook and the app, so
-there's one implementation to keep correct.
+Shared data-loading and modeling logic (`read_fasta`, `extract_gene_names`,
+`load_biogrid_interactions`, `extract_locuslink`, `get_interactors`,
+`create_embedding`, `create_embeddings_batch`) lives in `src/ppi_utils.py`
+and is imported by both the notebook and the app, so there's one
+implementation to keep correct — in particular, the Predictor page builds
+its feature vector with the exact same `create_embedding` function and
+concatenation order used to train the model in the notebook.
 
 ## Collaborating on the notebook
 

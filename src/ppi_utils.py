@@ -3,6 +3,11 @@
 import re
 
 import pandas as pd
+import torch
+from transformers import AutoTokenizer, AutoModel
+
+_ESM_MODEL_NAME = "facebook/esm2_t33_650M_UR50D"
+_esm_state = {}
 
 
 def read_fasta(file_path):
@@ -66,3 +71,75 @@ def get_interactors(bg, protein_id):
 
     # Combine, deduplicate, and return as a list
     return pd.concat([a_partners, b_partners]).drop_duplicates().tolist()
+
+
+def _load_esm_model():
+    """Lazily load the ESM2 model/tokenizer once, cached at module scope."""
+    if not _esm_state:
+        device = "mps" if torch.backends.mps.is_available() else "cpu"
+        _esm_state["tokenizer"] = AutoTokenizer.from_pretrained(
+            _ESM_MODEL_NAME
+        )
+        _esm_state["model"] = (
+            AutoModel.from_pretrained(_ESM_MODEL_NAME).to(device).eval()
+        )
+        _esm_state["device"] = device
+    return _esm_state["tokenizer"], _esm_state["model"], _esm_state["device"]
+
+
+def _mean_pool_residues(last_hidden_state, attention_mask):
+    """Mean-pool per-residue hidden states, excluding the CLS/EOS tokens."""
+    mask = attention_mask.clone()
+    seq_lens = attention_mask.sum(dim=1)
+    mask[:, 0] = 0  # CLS token
+    mask[torch.arange(mask.size(0)), seq_lens - 1] = 0  # EOS token
+    mask = mask.unsqueeze(-1).float()
+    return (last_hidden_state * mask).sum(1) / mask.sum(1)
+
+
+def create_embedding(seq):
+    """Generate the 1280-dim ESM2 embedding vector for one protein sequence."""
+    tokenizer, model, device = _load_esm_model()
+    inputs = tokenizer(
+        seq, return_tensors="pt", truncation=True, max_length=1022
+    ).to(device)
+    with torch.no_grad():
+        output = model(**inputs)
+    pooled = _mean_pool_residues(
+        output.last_hidden_state, inputs["attention_mask"]
+    )
+    return pooled[0].cpu().numpy()
+
+
+def create_embeddings_batch(seqs, batch_size=8):
+    """Generate ESM2 embeddings for many sequences, batched for throughput.
+
+    Sequences are processed longest-first so same-batch padding is
+    minimized (a handful of very long outlier sequences otherwise force
+    heavy padding on every batch they land in). Returns embeddings in the
+    same order as `seqs`.
+    """
+    tokenizer, model, device = _load_esm_model()
+    order = sorted(range(len(seqs)), key=lambda i: len(seqs[i]), reverse=True)
+    embeddings = [None] * len(seqs)
+
+    for start in range(0, len(order), batch_size):
+        batch_idx = order[start : start + batch_size]
+        batch_seqs = [seqs[i] for i in batch_idx]
+        inputs = tokenizer(
+            batch_seqs,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=1022,
+        ).to(device)
+        with torch.no_grad():
+            output = model(**inputs)
+        pooled = _mean_pool_residues(
+            output.last_hidden_state, inputs["attention_mask"]
+        )
+        pooled = pooled.cpu().numpy()
+        for i, idx in enumerate(batch_idx):
+            embeddings[idx] = pooled[i]
+
+    return embeddings
