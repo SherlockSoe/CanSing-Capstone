@@ -69,7 +69,7 @@
 import pandas as pd
 import numpy as np
 import warnings
-import re
+import sys
 
 # File read / write
 from pathlib import Path
@@ -101,6 +101,10 @@ DATA_DIR = REPO_ROOT / "data" / "raw"
 PROCESSED_DIR = REPO_ROOT / "data" / "processed"
 PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
+# Make src/ importable so helper functions can be shared with the
+# Streamlit app in app/ instead of being duplicated in both places.
+sys.path.insert(0, str(REPO_ROOT))
+
 path1 = DATA_DIR / "uniprotkb_proteome_UP000002311.fasta"
 path2 = (
     DATA_DIR
@@ -119,50 +123,15 @@ path2 = (
 
 
 # %%
-# Funtion to read the ID and Sequence info from the FASTA file
-def read_fasta(file_path):
-    sequences = {}
-    current_id = None
-    current_seq = []
-
-    with open(file_path, "r") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-
-            # Lines starting with '>' indicate a new sequence ID
-            if line.startswith(">"):
-                if current_id:
-                    sequences[current_id] = "".join(current_seq)
-                current_id = line[1:]  # Remove the '>' character
-                current_seq = []
-            else:
-                current_seq.append(line)
-
-        # Add the final sequence from the file
-        if current_id:
-            sequences[current_id] = "".join(current_seq)
-
-    return sequences
-
-
-# Function to extract the Uniprot gene IDs from the Biogrid dataframe
-def extract_locuslink(s):
-    match = re.search(r"locuslink:([^|]+)", s)
-    return match.group(1) if match else None
-
-
-# Function to extract interactions from Biogrid dataframe
-def get_interactors(bg, protein_id):
-    # Protein appears in column A
-    a_partners = bg.loc[bg["Gene_A"] == protein_id, "Gene_B"]
-
-    # Protein appears in column B
-    b_partners = bg.loc[bg["Gene_B"] == protein_id, "Gene_A"]
-
-    # Combine, deduplicate, and return as a list
-    return pd.concat([a_partners, b_partners]).drop_duplicates().tolist()
+# Shared with app/ (Streamlit GUI) via src/ppi_utils.py, so the data
+# loading logic has a single source of truth instead of being duplicated.
+from src.ppi_utils import (
+    read_fasta,
+    extract_locuslink,
+    extract_gene_names,
+    get_interactors,
+    load_biogrid_interactions,
+)
 
 
 # %% [markdown]
@@ -181,21 +150,9 @@ for record in SeqIO.parse(path1, "fasta"):
 # %%
 # Create the protein-sequence dictionary and a dictionary of protein
 # residue length
-seq_dic = {}
-len_dic = {}
 fasta_data = read_fasta(path1)
-
-for seq_id, sequence in fasta_data.items():
-    print(f"ID: {seq_id}\n")  # Sequence: {sequence}\n")
-
-    match = re.search(r"GN=(\S+)", seq_id)
-
-    if match:
-        gene_name = match.group(1)
-        print(gene_name)
-
-        seq_dic[gene_name] = sequence
-        len_dic[gene_name] = len(sequence)
+seq_dic = extract_gene_names(fasta_data)
+len_dic = {gene: len(seq) for gene, seq in seq_dic.items()}
 
 # Create a list of all proteins
 gene_list = list(seq_dic.keys())
@@ -217,15 +174,7 @@ if "CDC73" in gene_list:
 
 # %%
 # Now extract the Biogrid data and create the Biogrid dataframe
-bg = pd.read_csv(path2, sep="\t", header=None, dtype=str)
-
-print(bg.shape)
-
-# Reset the row and column indices
-bg.columns = bg.iloc[0]
-bg = bg[1:]
-bg.columns.name = None
-bg = bg.reset_index(drop=True)
+bg = load_biogrid_interactions(path2)
 
 print(bg.shape)
 

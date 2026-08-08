@@ -14,3 +14,4 @@ jupytext
 nbstripout
 flake8
 ruff
+streamlit

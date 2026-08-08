@@ -2,3 +2,8 @@ line-length = 79
 
 [lint]
 select = ["E", "W", "F"]
+
+# Notebook cells naturally interleave imports with code (a repo-root
+# bootstrap cell must run before `src` is importable) — matches .flake8.
+[lint.per-file-ignores]
+"notebooks/CapstoneNoteBookMain.py" = ["E402"]

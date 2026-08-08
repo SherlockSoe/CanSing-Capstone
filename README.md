@@ -49,6 +49,32 @@
    machine-specific editing needed, whether you launch Jupyter from the repo
    root or from `notebooks/`.
 
+## Running the GUI
+
+The project includes a Streamlit app (`app/`) that presents the report's
+narrative, dataset stats, and (once the model pipeline is built out) results
+and an interactive predictor. Run it from the repo root:
+
+```bash
+streamlit run app/Home.py
+```
+
+- **Home** — project background.
+- **Data Overview** — real numbers from the downloaded UniProt/BioGRID data
+  (step 3 above); shows a setup reminder if you haven't run the download
+  scripts yet.
+- **Data Cleaning**, **Model Results**, **Predictor** — populate
+  automatically once the notebook writes their backing artifacts
+  (`data/processed/cleaning_summary.json`, `model_metrics.json`,
+  `model.pkl`); until then they show what's still needed. No app changes
+  are required when those become available — see the docstring at the top
+  of each page in `app/pages/` for the exact expected file/field names.
+
+Shared data-loading logic (`read_fasta`, `extract_gene_names`,
+`load_biogrid_interactions`, `extract_locuslink`, `get_interactors`) lives
+in `src/ppi_utils.py` and is imported by both the notebook and the app, so
+there's one implementation to keep correct.
+
 ## Collaborating on the notebook
 
 - **Outputs are stripped automatically.** `nbstripout` (step 2 above) removes
@@ -68,21 +94,21 @@
 
 ## Code style
 
-The project's Python code — `scripts/*.py` and the notebook's `jupytext`
-mirror, `notebooks/CapstoneNoteBookMain.py` — is checked against PEP-8 with
-`flake8` (79-char line length, configured in `.flake8`). Before submitting or
-opening a PR, verify it's clean:
+The project's Python code — `scripts/*.py`, `src/*.py`, `app/`, and the
+notebook's `jupytext` mirror, `notebooks/CapstoneNoteBookMain.py` — is
+checked against PEP-8 with `flake8` (79-char line length, configured in
+`.flake8`). Before submitting or opening a PR, verify it's clean:
 
 ```bash
-flake8 scripts/ notebooks/CapstoneNoteBookMain.py
+flake8 scripts/ src/ app/ notebooks/CapstoneNoteBookMain.py
 ```
 
 No output means no violations. If you need to fix something, `ruff` (already
 in `requirements.txt`, configured in `ruff.toml`) auto-fixes most of it:
 
 ```bash
-ruff format scripts/ notebooks/CapstoneNoteBookMain.py
-ruff check --fix scripts/ notebooks/CapstoneNoteBookMain.py
+ruff format scripts/ src/ app/ notebooks/CapstoneNoteBookMain.py
+ruff check --fix scripts/ src/ app/ notebooks/CapstoneNoteBookMain.py
 ```
 
 Then run `jupytext --sync notebooks/CapstoneNoteBookMain.ipynb` to carry the
@@ -91,8 +117,10 @@ fixes from the `.py` mirror back into the notebook.
 ## Project structure
 
 ```
+app/              Streamlit GUI (streamlit run app/Home.py)
 data/raw/         Downloaded source data (gitignored, populate via scripts/)
 data/processed/   Generated intermediate artifacts, e.g. interactions.pkl (gitignored)
 notebooks/        Analysis and modeling notebook (paired .ipynb + .py via jupytext)
 scripts/          Data-download scripts
+src/              Shared data-loading logic, imported by both the notebook and app/
 ```

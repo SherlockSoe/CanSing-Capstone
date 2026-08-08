@@ -1,3 +1,8 @@
 [flake8]
 max-line-length = 79
 exclude = .git,__pycache__,.ipynb_checkpoints,data,.venv,venv
+# Notebook cells naturally interleave imports with code (e.g. a repo-root
+# bootstrap cell must run before `src` is importable), unlike a normal
+# top-to-bottom script.
+per-file-ignores =
+    notebooks/CapstoneNoteBookMain.py:E402

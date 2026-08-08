@@ -15,6 +15,7 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+.ruff_cache/
 
 # OS
 .DS_Store
