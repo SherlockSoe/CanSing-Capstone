@@ -2,11 +2,11 @@
 
 import re
 
+import esm
+import numpy as np
 import pandas as pd
 import torch
-from transformers import AutoTokenizer, AutoModel
 
-_ESM_MODEL_NAME = "facebook/esm2_t33_650M_UR50D"
 _esm_state = {}
 
 
@@ -74,72 +74,104 @@ def get_interactors(bg, protein_id):
 
 
 def _load_esm_model():
-    """Lazily load the ESM2 model/tokenizer once, cached at module scope."""
+    """Lazily load the ESM2 model/alphabet once, cached at module scope."""
     if not _esm_state:
-        device = "mps" if torch.backends.mps.is_available() else "cpu"
-        _esm_state["tokenizer"] = AutoTokenizer.from_pretrained(
-            _ESM_MODEL_NAME
-        )
-        _esm_state["model"] = (
-            AutoModel.from_pretrained(_ESM_MODEL_NAME).to(device).eval()
-        )
+        if torch.cuda.is_available():
+            device = "cuda"
+        elif torch.backends.mps.is_available():
+            device = "mps"
+        else:
+            device = "cpu"
+
+        model, alphabet = esm.pretrained.esm2_t33_650M_UR50D()
+        model.eval()
+        model.to(device)
+
+        _esm_state["model"] = model
+        _esm_state["alphabet"] = alphabet
+        _esm_state["batch_converter"] = alphabet.get_batch_converter()
+        _esm_state["last_layer"] = len(model.layers)
         _esm_state["device"] = device
-    return _esm_state["tokenizer"], _esm_state["model"], _esm_state["device"]
+    return (
+        _esm_state["model"],
+        _esm_state["alphabet"],
+        _esm_state["batch_converter"],
+        _esm_state["last_layer"],
+        _esm_state["device"],
+    )
 
 
-def _mean_pool_residues(last_hidden_state, attention_mask):
-    """Mean-pool per-residue hidden states, excluding the CLS/EOS tokens."""
-    mask = attention_mask.clone()
-    seq_lens = attention_mask.sum(dim=1)
-    mask[:, 0] = 0  # CLS token
-    mask[torch.arange(mask.size(0)), seq_lens - 1] = 0  # EOS token
+def _mean_pool_residues(token_representations, batch_tokens, padding_idx):
+    """Mean-pool per-residue hidden states, excluding the CLS/EOS/padding
+    positions."""
+    mask = batch_tokens != padding_idx
+    seq_lens = mask.sum(dim=1)
+    mask = mask.clone()
+    mask[:, 0] = False  # CLS token
+    mask[torch.arange(mask.size(0)), seq_lens - 1] = False  # EOS token
     mask = mask.unsqueeze(-1).float()
-    return (last_hidden_state * mask).sum(1) / mask.sum(1)
+    return (token_representations * mask).sum(1) / mask.sum(1)
 
 
-def create_embedding(seq):
+def get_esm_embedding(seq):
     """Generate the 1280-dim ESM2 embedding vector for one protein sequence."""
-    tokenizer, model, device = _load_esm_model()
-    inputs = tokenizer(
-        seq, return_tensors="pt", truncation=True, max_length=1022
-    ).to(device)
+    model, alphabet, batch_converter, last_layer, device = _load_esm_model()
+    _, _, batch_tokens = batch_converter([("P", seq)])
+    batch_tokens = batch_tokens.to(device)
     with torch.no_grad():
-        output = model(**inputs)
+        results = model(
+            batch_tokens, repr_layers=[last_layer], return_contacts=False
+        )
+    token_representations = results["representations"][last_layer]
     pooled = _mean_pool_residues(
-        output.last_hidden_state, inputs["attention_mask"]
+        token_representations, batch_tokens, alphabet.padding_idx
     )
     return pooled[0].cpu().numpy()
 
 
-def create_embeddings_batch(seqs, batch_size=8):
+def get_esm_embeddings_batch(seqs, batch_size=8, max_tokens_per_batch=4096):
     """Generate ESM2 embeddings for many sequences, batched for throughput.
 
     Sequences are processed longest-first so same-batch padding is
     minimized (a handful of very long outlier sequences otherwise force
-    heavy padding on every batch they land in). Returns embeddings in the
-    same order as `seqs`.
+    heavy padding on every batch they land in). Batch size is additionally
+    capped so that `batch_size * longest_seq_in_batch` stays under
+    `max_tokens_per_batch` (mirrors fair-esm's own `extract.py` default) —
+    attention memory grows with the *square* of sequence length, so a
+    handful of long outliers (e.g. yeast's ~4900-residue MDN1) batched at
+    a fixed size can blow past the MPS backend's ~4GB single-buffer limit.
+    Returns embeddings in the same order as `seqs`.
     """
-    tokenizer, model, device = _load_esm_model()
+    model, alphabet, batch_converter, last_layer, device = _load_esm_model()
     order = sorted(range(len(seqs)), key=lambda i: len(seqs[i]), reverse=True)
     embeddings = [None] * len(seqs)
 
-    for start in range(0, len(order), batch_size):
-        batch_idx = order[start : start + batch_size]
-        batch_seqs = [seqs[i] for i in batch_idx]
-        inputs = tokenizer(
-            batch_seqs,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            max_length=1022,
-        ).to(device)
+    start = 0
+    while start < len(order):
+        longest_in_batch = len(seqs[order[start]])
+        max_count = max_tokens_per_batch // longest_in_batch
+        count = max(1, min(batch_size, max_count))
+        batch_idx = order[start : start + count]
+        start += count
+        batch_data = [("P", seqs[i]) for i in batch_idx]
+        _, _, batch_tokens = batch_converter(batch_data)
+        batch_tokens = batch_tokens.to(device)
         with torch.no_grad():
-            output = model(**inputs)
+            results = model(
+                batch_tokens, repr_layers=[last_layer], return_contacts=False
+            )
+        token_representations = results["representations"][last_layer]
         pooled = _mean_pool_residues(
-            output.last_hidden_state, inputs["attention_mask"]
+            token_representations, batch_tokens, alphabet.padding_idx
         )
         pooled = pooled.cpu().numpy()
         for i, idx in enumerate(batch_idx):
             embeddings[idx] = pooled[i]
 
     return embeddings
+
+
+def get_pairwise_features(emb1, emb2):
+    """Symmetric pairwise feature vector for two embeddings: the absolute
+    difference concatenated with the element-wise product."""
+    return np.concatenate([np.abs(emb1 - emb2), emb1 * emb2])

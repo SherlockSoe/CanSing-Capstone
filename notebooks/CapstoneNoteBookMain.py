@@ -8,7 +8,7 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.19.5
 #   kernelspec:
-#     display_name: Python 3
+#     display_name: Python 3 (ipykernel)
 #     language: python
 #     name: python3
 # ---
@@ -69,6 +69,7 @@
 import pandas as pd
 import numpy as np
 import warnings
+import random
 import sys
 
 # File read / write
@@ -76,6 +77,26 @@ from pathlib import Path
 import json
 import pickle
 
+# Machine Learning / Modeling
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    roc_auc_score,
+    roc_curve,
+    precision_recall_curve,
+    average_precision_score,
+    confusion_matrix,
+)
+
+# Deep Learning
+from tensorflow import keras
+from tensorflow.keras import layers
+
+# BioPython
 from Bio import SeqIO
 
 # Environment Settings
@@ -112,9 +133,13 @@ path2 = (
     / "BIOGRID-ORGANISM-Saccharomyces_cerevisiae_S288c-5.0.259.mitab.txt"
 )
 
-
 # %%
+# New installations required for this project
+
 # #%pip install biopython
+# pip install torch
+# pip install fair-esm
+# pip install tensorflow tensorflow-metal  # tensorflow-metal is macOS-only
 
 # %% [markdown]
 # # Helper Functions
@@ -122,24 +147,35 @@ path2 = (
 # In this section we're defining some helper functions for use in the rest
 # of the notebook.
 
-
 # %%
 # Shared with app/ (Streamlit GUI) via src/ppi_utils.py, so the data
-# loading logic has a single source of truth instead of being duplicated.
-from src.ppi_utils import (
+# loading and embedding logic has a single source of truth instead of
+# being duplicated.
+from src.ppi_utils import (  # noqa: E402
     read_fasta,
     extract_locuslink,
     extract_gene_names,
     get_interactors,
     load_biogrid_interactions,
+    get_esm_embedding,
+    get_esm_embeddings_batch,
+    get_pairwise_features,
 )
+
+
+# %%
+# Function to generate a random amino acid sequence of fixed length, used
+# below as an embedding sanity check (a random sequence should look
+# "unrelated" to everything else).
+def random_protein(length):
+    return "".join(random.choices("ACDEFGHIKLMNPQRSTVWY", k=length))
 
 
 # %% [markdown]
 # # Section 1 - Data Import
 #
-# In this section we are importing amino acid sequences for all 6,067 amino
-# acids in S. cerevisiae.
+# In this section we are importing amino acid sequences for all 6,067
+# amino acids in S. cerevisiae.
 
 # %%
 # Import dataset
@@ -152,26 +188,25 @@ for record in SeqIO.parse(path1, "fasta"):
 # Create the protein-sequence dictionary and a dictionary of protein
 # residue length
 fasta_data = read_fasta(path1)
-seq_dic = extract_gene_names(fasta_data)
-len_dic = {gene: len(seq) for gene, seq in seq_dic.items()}
+sequence_dictionary = extract_gene_names(fasta_data)
+length_dictionary = {
+    gene: len(seq) for gene, seq in sequence_dictionary.items()
+}
 
 # Create a list of all proteins
-gene_list = list(seq_dic.keys())
-
-# %% [markdown]
-# Here we are importing the interaction data from BioGrid.
+gene_list = list(sequence_dictionary.keys())
 
 # %%
 # Inspect the results
-# seq_dic
-# len_dic
-gene_list
 len(gene_list)
 
 # %%
 # Check if a particular gene is included in the Uniprot data
 if "CDC73" in gene_list:
     print("Item found!")
+
+# %% [markdown]
+# Here we are importing the interaction data from BioGrid.
 
 # %%
 # Now extract the Biogrid data and create the Biogrid dataframe
@@ -193,23 +228,25 @@ bg["Gene_B"] = bg["Alt IDs Interactor B"].apply(extract_locuslink)
 
 bg.head()
 
+# %% [markdown]
+# This cell takes quite a while to run locally; therefore writing the
+# results to file for future use.
+
 # %%
-# Now we make the interaction dictionary
+# Now we make the interaction dictionary and write to file for future use
 ia_dic = {}
 
+# Iterate through each gene and extract interactions
 for gene in gene_list:
     interactors = get_interactors(bg, gene)
     ia_dic[gene] = interactors
-
-# %%
-# Clean up the interaction dictionary
 
 # Write the interaction dictionary to file
 with open(PROCESSED_DIR / "interactions.pkl", "wb") as file:
     pickle.dump(ia_dic, file)
 
 # %%
-# Reading dictionary from the binary file
+# Read the interaction dictionary from the binary file
 with open(PROCESSED_DIR / "interactions.pkl", "rb") as file:
     interaction_dictionary = pickle.load(file)
 
@@ -218,404 +255,421 @@ with open(PROCESSED_DIR / "interactions.pkl", "rb") as file:
 interaction_dictionary
 
 # %% [markdown]
-# # Section 2 - Data Cleaning
+# # Section 2 - Data Cleaning & Pre-processing
 #
-# In this section we narrow the 6,067 candidate proteins down to a smaller,
-# non-redundant set. We cluster near-identical sequences with CD-HIT and
-# keep only one representative protein per cluster, which limits how much
-# sequence overlap can leak across the train/test split in Section 4.
+# In this section we perform some data cleaning and pre-processing
+# operations. First, we need to make sure we have sequence and interaction
+# data for all proteins.
 
 # %%
-# Cluster protein sequences with CD-HIT at a 40% identity threshold (a
-# standard low-redundancy threshold in PPI-prediction literature) and keep
-# only each cluster's representative sequence. Requires the `cd-hit`
-# binary (`brew install brewsci/bio/cd-hit`, see README).
-import subprocess
+# Find entries in the interaction dictionary that are empty
+empty_keys = [
+    key for key, value in interaction_dictionary.items() if not value
+]
+print("Number of empty entries in the interaction dictionary:")
+print(len(empty_keys))
 
-CDHIT_INPUT = PROCESSED_DIR / "cdhit_input.fasta"
-CDHIT_OUTPUT = PROCESSED_DIR / "cdhit_out"
+# Remove them from the sequence and interaction dictionaries
+for key in empty_keys:
+    sequence_dictionary.pop(key, None)
+    length_dictionary.pop(key, None)
+    interaction_dictionary.pop(key, None)
 
-with open(CDHIT_INPUT, "w") as f:
-    for gene, seq in seq_dic.items():
-        f.write(f">{gene}\n{seq}\n")
+print("")
+print("Number of proteins for which we have sequence AND interaction data:")
+print(len(sequence_dictionary))
 
-subprocess.run(
-    [
-        "cd-hit",
-        "-i",
-        str(CDHIT_INPUT),
-        "-o",
-        str(CDHIT_OUTPUT),
-        "-c",
-        "0.4",  # 40% sequence identity threshold
-        "-n",
-        "2",  # word length matching the 0.4-0.5 identity range
-        "-M",
-        "0",  # no memory limit
-        "-d",
-        "0",  # keep full sequence names in the .clstr file
-    ],
-    check=True,
-)
+new_gene_list = list(sequence_dictionary.keys())
 
 # %%
-# Parse the .clstr file: each cluster's representative is marked with "*".
-cluster_of = {}
-representative_of_cluster = {}
-cluster_id = None
-
-with open(f"{CDHIT_OUTPUT}.clstr") as f:
-    for line in f:
-        if line.startswith(">Cluster"):
-            cluster_id = int(line.split()[-1])
-        else:
-            gene = line.split(">")[1].split("...")[0]
-            cluster_of[gene] = cluster_id
-            if line.strip().endswith("*"):
-                representative_of_cluster[cluster_id] = gene
-
-kept_genes = set(representative_of_cluster.values())
-
-print(f"Proteins before cleaning: {len(seq_dic)}")
-print(f"Clusters found: {len(representative_of_cluster)}")
-print(f"Proteins kept (cluster representatives): {len(kept_genes)}")
-
-# %%
-# Write a Sankey-ready summary for the Streamlit app's Data Cleaning page:
-# all proteins -> kept/dropped, then kept -> has/lacks any recorded BioGRID
-# interaction (informational only; the physical-vs-genetic interaction
-# filter used for modeling is applied later, in Section 4).
-n_kept = len(kept_genes)
-n_dropped = len(seq_dic) - n_kept
-
-genes_with_any_interaction = set(bg["Gene_A"]) | set(bg["Gene_B"])
-kept_with_interactions = len(kept_genes & genes_with_any_interaction)
-kept_without_interactions = n_kept - kept_with_interactions
-
+# Write a summary for the Streamlit app's Data Cleaning page: all proteins
+# -> has interaction data / no interaction data.
 cleaning_summary = {
     "labels": [
         "All proteins",
-        "Kept (non-redundant)",
-        "Dropped (redundant)",
         "Has interaction data",
         "No interaction data",
     ],
-    "source": [0, 0, 1, 1],
-    "target": [1, 2, 3, 4],
-    "value": [
-        n_kept,
-        n_dropped,
-        kept_with_interactions,
-        kept_without_interactions,
-    ],
+    "source": [0, 0],
+    "target": [1, 2],
+    "value": [len(new_gene_list), len(empty_keys)],
 }
 
 with open(PROCESSED_DIR / "cleaning_summary.json", "w") as f:
     json.dump(cleaning_summary, f)
 
 # %%
-# Keep only cluster-representative proteins and the interactions between
-# them.
-gene_list = [gene for gene in gene_list if gene in kept_genes]
-seq_dic = {gene: seq for gene, seq in seq_dic.items() if gene in kept_genes}
-len_dic = {gene: n for gene, n in len_dic.items() if gene in kept_genes}
-bg = bg[bg["Gene_A"].isin(kept_genes) & bg["Gene_B"].isin(kept_genes)]
-bg = bg.reset_index(drop=True)
+# Next we need to remove any interactors for which we don't have sequence
+# data
+interaction_dictionary_filtered = {
+    protein: [p for p in partners if p in new_gene_list]
+    for protein, partners in interaction_dictionary.items()
+}
 
-print(f"Interaction rows after cleaning: {len(bg)}")
+# %%
+interaction_dictionary_filtered
+
+# %%
+# Finally we create the overall interaction matrix using the interaction
+# dictionary - a square matrix with 1's indicating interactions, 0's
+# indicating no interaction
+
+# We will call this the 'Master Interaction Matrix' or MIM
+MIM = pd.DataFrame(0, index=new_gene_list, columns=new_gene_list)
+
+for protein, partners in interaction_dictionary_filtered.items():
+    MIM.loc[protein, partners] = 1
+
+# %%
+# Perform some checks to make sure MIM is setup correctly, check sparsity
+row = "CET1"
+column = "STE2"
+
+print(f"MIM entry at {row}, {column}:")
+print(MIM.loc[row, column])
+print("")
+
+# See how sparse MIM is
+count_ones = np.count_nonzero(MIM)
+print("Number of non-zero entries in the MIM:")
+print(count_ones)
+print("")
+
+print("Total number of entries in the MIM:")
+num_entries = len(new_gene_list) ** 2
+print(num_entries)
+print("")
+
+print("Sparsity of the MIM:")
+print(count_ones / num_entries)
 
 # %% [markdown]
 # # Section 3 - Create Embeddings
 #
-# In this section we generate ESM-2 embeddings for each of the remaining
-# (post-cleaning) proteins, using the `create_embeddings_batch` helper
-# from `src/ppi_utils.py` (the same module the Streamlit predictor uses).
+# In this section we are creating the embeddings for all the proteins for
+# which we have sequence AND interaction data. We will then perform some
+# checks to make sure the embeddings are behaving as expected, by
+# comparing the cosine similarity between various embeddings.
 
 # %%
-from src.ppi_utils import create_embeddings_batch
+# Perform some basic checks of the embedding
 
+# Define a sequence and confirm the embedding has the right dimensionality
+seq1 = (
+    "MSDAAPSLSNLFYDPTYNPGQSTINYTSIYGNGSTITFDELQGLVNSTVTQAIMFGVRCGAAALTLIVM"
+    "WMTSRSRKTPIFIINQVSLFLIILHSALYFKYLLSNYSSVTYALTGFPQFISRGDVHVYGATNIIQVL"
+    "LVASIETSLVFQIKVIFTGDNFKRIGLMLTSISFTLGIATVTMYFVSAVKGMIVTYNDVSATQDKYFN"
+    "ASTILLASSINFMSFVLVVKLILAIRSRRFLGLKQFDSFHILLIMSCQSLLVPSIIFILAYSLKPNQG"
+    "TDVLTTVATLLAVLSLPLSSMWATAANNASKTNTITSDFTTSTDRFYPGTLSSFQTDSINNDAKSSLR"
+    "SRLYDLYPRRKETTSDKHSERTFVSETADDIEKNQFYQLPTPTSSKNTRIGPFADASYKEGEVEPVDM"
+    "YTPDTAADEEARKFWTEDNNNL"
+)
+emb1 = get_esm_embedding(seq1)
+
+# Confirm shape, content
+print("Length of sequence embedding:")
+print(len(emb1))
+print("")
+print("Values in embedding:")
+print(emb1)
+
+# %%
+# Perform some more advanced checks
+
+# Define two similar proteins - human alpha globin (HAG) and human beta
+# globin (HBG)
+HAG = (
+    "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALT"
+    "NAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTV"
+    "LTSKYR"
+)
+HBG = (
+    "MVHLTPEEKSAVTALWGKVNVDEVGGEALGRLLVVYPWTQRFFESFGDLSTPDAVMGNPKVKAHGKKV"
+    "LGAFSDGLAHLDNLKGTFATLSELHCDKLHVDPENFRLLGNVLVCVLAHHFGKEFTPPVQAAYQKVVA"
+    "GVANALAHKYH"
+)
+
+# Pick a random S. cerivisiae protein
+CDC73 = sequence_dictionary["CDC73"]
+
+# Create 2 random proteins of similar length
+rand1 = random_protein(150)
+rand2 = random_protein(150)
+
+# Check the cosine similarity between the two
+alpha = get_esm_embedding(HAG)
+beta = get_esm_embedding(HBG)
+delta = get_esm_embedding(CDC73)
+gamma1 = get_esm_embedding(rand1)
+gamma2 = get_esm_embedding(rand2)
+
+# %%
+# Calculate the cosine similarity between HAG and HBG
+print(
+    "Cosine similarity between human alpha globin (HAG) and human beta "
+    "globin (HBG) embeddings:"
+)
+a = alpha
+b = beta
+similarity = np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+print(similarity)
+print("")
+
+# Calculate the cosine similarity between HAG and a protein sequence from
+# S. cerivisiae
+print("Cosine similarity between human alpha globin (HAG) and CDC73:")
+a = alpha
+b = delta
+similarity = np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+print(similarity)
+print("")
+
+# Calculate the cosine similarity between HAG and a random protein
+# sequence
+print(
+    "Cosine similarity between human alpha globin (HAG) and a random "
+    "protein sequence:"
+)
+a = alpha
+b = gamma1
+similarity = np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+print(similarity)
+print("")
+
+# Calculate the cosine similarity between HAG and the other random
+# protein sequence
+print(
+    "Cosine similarity between human alpha globin (HAG) and another "
+    "random protein sequence:"
+)
+a = alpha
+b = gamma2
+similarity = np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+print(similarity)
+
+# %% [markdown]
+# This cell takes quite a while to run locally; therefore writing the
+# results to file for future use.
+
+# %%
+# Create a dictionary of embeddings for all proteins, and write to file
 EMBEDDINGS_PATH = PROCESSED_DIR / "embeddings.pkl"
 
 if EMBEDDINGS_PATH.exists():
-    with open(EMBEDDINGS_PATH, "rb") as f:
-        embedding_dic = pickle.load(f)
+    with open(EMBEDDINGS_PATH, "rb") as file:
+        embedding_dict = pickle.load(file)
 else:
-    embedded_gene_order = list(seq_dic.keys())
-    vectors = create_embeddings_batch(list(seq_dic.values()), batch_size=8)
-    embedding_dic = dict(zip(embedded_gene_order, vectors))
-    with open(EMBEDDINGS_PATH, "wb") as f:
-        pickle.dump(embedding_dic, f)
-
-print(f"Embedded {len(embedding_dic)} proteins")
-print(f"Embedding dimension: {len(next(iter(embedding_dic.values())))}")
-
-# %% [markdown]
-# ## Validating the embeddings
-#
-# As a sanity check, we visualize the embedding space with PCA and confirm
-# that known interacting protein pairs are, on average, more similar
-# (higher cosine similarity) than random protein pairs -- a simple signal
-# that the embeddings capture something biologically meaningful before we
-# build a classifier on top of them.
+    embedded_gene_order = list(new_gene_list)
+    vectors = get_esm_embeddings_batch(
+        [sequence_dictionary[gene] for gene in embedded_gene_order],
+        batch_size=8,
+    )
+    embedding_dict = dict(zip(embedded_gene_order, vectors))
+    with open(EMBEDDINGS_PATH, "wb") as file:
+        pickle.dump(embedding_dict, file)
 
 # %%
-from sklearn.decomposition import PCA
-import plotly.express as px
-
-genes_embedded = list(embedding_dic.keys())
-embedding_matrix = np.array([embedding_dic[g] for g in genes_embedded])
-
-coords = PCA(n_components=2, random_state=42).fit_transform(embedding_matrix)
-pca_df = pd.DataFrame(
-    {
-        "PC1": coords[:, 0],
-        "PC2": coords[:, 1],
-        "length": [len_dic[g] for g in genes_embedded],
-        "gene": genes_embedded,
-    }
-)
-px.scatter(
-    pca_df,
-    x="PC1",
-    y="PC2",
-    color="length",
-    hover_name="gene",
-    title="ESM-2 embeddings (PCA), colored by sequence length",
-)
-
-# %%
-# Compare cosine similarity for known-interacting pairs vs. random pairs.
-
-
-def cosine_sim(a, b):
-    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
-
-
-interacting_pairs = list(
-    bg[["Gene_A", "Gene_B"]]
-    .drop_duplicates()
-    .itertuples(index=False, name=None)
-)
-interacting_sims = [
-    cosine_sim(embedding_dic[a], embedding_dic[b])
-    for a, b in interacting_pairs
-    if a in embedding_dic and b in embedding_dic
-]
-
-validation_rng = np.random.default_rng(42)
-random_sims = []
-while len(random_sims) < len(interacting_sims):
-    a, b = validation_rng.choice(genes_embedded, size=2, replace=False)
-    random_sims.append(cosine_sim(embedding_dic[a], embedding_dic[b]))
-
-print(
-    "Mean cosine similarity, interacting pairs: "
-    f"{np.mean(interacting_sims):.4f}"
-)
-print(f"Mean cosine similarity, random pairs:      {np.mean(random_sims):.4f}")
+embedding_dict
 
 # %% [markdown]
 # # Section 4 - Train the Model
 #
-# In this section we build a labeled dataset of interacting (positive) and
-# non-interacting (negative) protein pairs, split it into train/test sets
-# without leaking sequence-similar proteins across the split, and train
-# several candidate models for comparison.
-
-# %% [markdown]
-# ## Defining a positive interaction
-#
-# BioGRID's yeast data is dominated by large-scale *genetic* interaction
-# screens (synthetic lethality, genetic suppression, dosage effects, etc.)
-# rather than direct physical binding. Since this project defines PPI as a
-# physical association (see Background), we restrict positive pairs to
-# BioGRID's physical interaction types: physical association (MI:0915),
-# direct interaction (MI:0407), and association (MI:0914) -- excluding
-# colocalization and every genetic-interaction category.
+# In this section we begin training our NN model
 
 # %%
-PHYSICAL_INTERACTION_TYPES = ("MI:0915", "MI:0407", "MI:0914")
-is_physical = bg["Interaction Types"].str.contains(
-    "|".join(PHYSICAL_INTERACTION_TYPES)
+# First we need to create a test/train split
+train_proteins, test_proteins = train_test_split(
+    new_gene_list,
+    test_size=0.20,  # Train on 80% of the data, test on the other 20%
+    random_state=42,
 )
-bg_physical = bg[is_physical]
 
-print(f"Interaction rows (all types): {len(bg)}")
-print(f"Interaction rows (physical only): {len(bg_physical)}")
+# Now form test and train interaction matrices
+MIM_train = MIM.loc[train_proteins, train_proteins]
+MIM_test = MIM.loc[test_proteins, test_proteins]
+
 
 # %%
-# Positive pairs: deduplicated physical interactions (unordered), excluding
-# self-pairs and restricted to proteins we generated embeddings for.
-positive_pairs = set()
-for gene_a, gene_b in bg_physical[["Gene_A", "Gene_B"]].itertuples(
-    index=False
+def create_balanced_dataset(
+    interaction_matrix, embeddings, n=1000, random_state=42
 ):
-    if gene_a == gene_b:
-        continue
-    if gene_a not in embedding_dic or gene_b not in embedding_dic:
-        continue
-    positive_pairs.add(tuple(sorted((gene_a, gene_b))))
+    rng = np.random.default_rng(random_state)
 
-positive_pairs = list(positive_pairs)
-print(f"Positive pairs: {len(positive_pairs)}")
+    proteins = interaction_matrix.index.to_numpy()
 
-# %%
-# Negative pairs: random protein pairs with no recorded BioGRID
-# interaction (of any type), sampled 1:1 against the positive pairs. This
-# is the standard approach for PPI datasets, since BioGRID only records
-# observed interactions -- a randomly-sampled "negative" could in
-# principle be a true, simply unrecorded interaction. We discuss this
-# limitation in the written report.
-all_known_pairs = {
-    tuple(sorted((a, b)))
-    for a, b in bg[["Gene_A", "Gene_B"]].itertuples(index=False)
-    if a != b
-}
+    # Get upper-triangle indices, excluding diagonal
+    i, j = np.triu_indices(len(proteins), k=1)
 
-sampling_rng = np.random.default_rng(42)
-embedded_genes = np.array(list(embedding_dic.keys()))
-negative_pairs = set()
+    # Get corresponding interaction values
+    values = interaction_matrix.values[i, j]
 
-while len(negative_pairs) < len(positive_pairs):
-    gene_a, gene_b = sampling_rng.choice(embedded_genes, size=2, replace=False)
-    pair = tuple(sorted((gene_a, gene_b)))
-    if pair not in all_known_pairs and pair not in negative_pairs:
-        negative_pairs.add(pair)
+    # Separate positive and negative pairs
+    positive_idx = np.where(values == 1)[0]
+    negative_idx = np.where(values == 0)[0]
 
-negative_pairs = list(negative_pairs)
-print(f"Negative pairs: {len(negative_pairs)}")
+    # Check that enough pairs exist
+    if len(positive_idx) < n:
+        raise ValueError(
+            f"Only {len(positive_idx)} positive pairs available; "
+            f"cannot sample {n}."
+        )
 
-# %%
-# Split at the CD-HIT cluster level (Section 2), so no two proteins from
-# the same cluster end up on both sides of the train/test split.
-embedded_clusters = sorted({cluster_of[g] for g in embedded_genes})
-split_rng = np.random.default_rng(42)
-split_rng.shuffle(embedded_clusters)
+    if len(negative_idx) < n:
+        raise ValueError(
+            f"Only {len(negative_idx)} negative pairs available; "
+            f"cannot sample {n}."
+        )
 
-split_point = int(len(embedded_clusters) * 0.8)
-train_clusters = set(embedded_clusters[:split_point])
-test_clusters = set(embedded_clusters[split_point:])
-assert not (train_clusters & test_clusters)
+    # Randomly select n of each
+    positive_sample = rng.choice(positive_idx, size=n, replace=False)
+    negative_sample = rng.choice(negative_idx, size=n, replace=False)
 
-gene_split = {
-    gene: ("train" if cluster_of[gene] in train_clusters else "test")
-    for gene in embedded_genes
-}
+    selected = np.concatenate([positive_sample, negative_sample])
 
+    # Shuffle positive and negative examples together
+    rng.shuffle(selected)
 
-def pair_split(gene_a, gene_b):
-    side_a, side_b = gene_split[gene_a], gene_split[gene_b]
-    return side_a if side_a == side_b else None
+    X = []
+    y = []
+    pairs = []
 
+    for idx in selected:
+        protein_a = proteins[i[idx]]
+        protein_b = proteins[j[idx]]
 
-labeled_pairs = [(a, b, 1) for a, b in positive_pairs] + [
-    (a, b, 0) for a, b in negative_pairs
-]
+        emb_a = embeddings[protein_a]
+        emb_b = embeddings[protein_b]
 
-X_train, y_train, X_test, y_test = [], [], [], []
-for gene_a, gene_b, label in labeled_pairs:
-    side = pair_split(gene_a, gene_b)
-    if side is None:
-        continue  # pair straddles the train/test boundary -- drop it
-    features = np.concatenate([embedding_dic[gene_a], embedding_dic[gene_b]])
-    if side == "train":
-        X_train.append(features)
-        y_train.append(label)
-    else:
-        X_test.append(features)
-        y_test.append(label)
+        # Symmetric pair representation
+        pair_embedding = get_pairwise_features(emb_a, emb_b)
 
-X_train, y_train = np.array(X_train), np.array(y_train)
-X_test, y_test = np.array(X_test), np.array(y_test)
+        X.append(pair_embedding)
+        y.append(values[idx])
+        pairs.append((protein_a, protein_b))
 
-print(f"Train pairs: {len(X_train)}, positives: {y_train.sum()}")
-print(f"Test pairs:  {len(X_test)}, positives: {y_test.sum()}")
+    return np.array(X), np.array(y), pairs
+
 
 # %%
-# Train the candidate models: a linear baseline, two tree-ensemble
-# methods, and the feed-forward neural network we ultimately select.
-from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.neural_network import MLPClassifier
-from lightgbm import LGBMClassifier
-from xgboost import XGBClassifier
+# Create test and train dataframes
+X_train, y_train, train_pairs = create_balanced_dataset(
+    MIM_train,
+    embedding_dict,
+    n=100000,  # Positive+negative interactions pulled from the train MIM
+    random_state=42,
+)
 
-candidate_models = {
-    "Logistic Regression": LogisticRegression(max_iter=1000, random_state=42),
-    "Random Forest": RandomForestClassifier(
-        n_estimators=200, random_state=42, n_jobs=-1
-    ),
-    "LightGBM": LGBMClassifier(random_state=42),
-    "XGBoost": XGBClassifier(
-        random_state=42, eval_metric="logloss", n_jobs=-1
-    ),
-    "Feed-Forward Neural Network": MLPClassifier(
-        hidden_layer_sizes=(512, 128),
-        max_iter=200,
-        early_stopping=True,
-        random_state=42,
-    ),
-}
+X_test, y_test, test_pairs = create_balanced_dataset(
+    MIM_test,
+    embedding_dict,
+    n=10000,  # Positive+negative interactions pulled from the test MIM
+    random_state=42,
+)
 
-fitted_models = {}
-for model_name, model in candidate_models.items():
-    print(f"Training {model_name}...")
-    model.fit(X_train, y_train)
-    fitted_models[model_name] = model
+# Scale the train and test sets
+scaler = StandardScaler()
+
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+# %%
+# Define a simple neural network to start with
+model = keras.Sequential(
+    [
+        layers.Input(shape=(X_train.shape[1],)),
+        layers.Dense(512, activation="relu"),
+        layers.Dropout(0.3),
+        layers.Dense(256, activation="relu"),
+        layers.Dropout(0.3),
+        layers.Dense(64, activation="relu"),
+        layers.Dense(1, activation="sigmoid"),
+    ]
+)
+
+model.compile(
+    optimizer=keras.optimizers.Adam(learning_rate=0.001),
+    loss="binary_crossentropy",
+    metrics=[
+        "accuracy",
+        keras.metrics.AUC(name="auc"),
+        keras.metrics.Precision(name="precision"),
+        keras.metrics.Recall(name="recall"),
+    ],
+)
+
+model.summary()
+
+# %%
+# Train the simple neural network
+early_stopping = keras.callbacks.EarlyStopping(
+    monitor="val_auc",
+    mode="max",
+    patience=10,
+    restore_best_weights=True,
+)
+
+history = model.fit(
+    X_train,
+    y_train,
+    validation_split=0.2,
+    epochs=100,
+    batch_size=32,
+    callbacks=[early_stopping],
+    verbose=1,
+)
+
+# %%
+# Save it for future use
+model.save(PROCESSED_DIR / "model.keras")
+
+# %%
+# Re-load the previously trained model (as opposed to re-training)
+model = keras.models.load_model(PROCESSED_DIR / "model.keras")
 
 # %% [markdown]
 # # Section 5 - Evaluate the Model
 #
-# In this section we evaluate each candidate model on the held-out test
-# set, compare their performance, and select the feed-forward neural
-# network as the final model.
+# In this section we evaluate the trained model on the held-out test set.
 
 # %%
-from sklearn.metrics import (
-    accuracy_score,
-    precision_score,
-    recall_score,
-    f1_score,
-    roc_auc_score,
-    roc_curve,
-    precision_recall_curve,
-    average_precision_score,
-    confusion_matrix,
-)
+# Evaluate the model
+results = model.evaluate(X_test, y_test, verbose=0)
 
-model_metrics = {}
-for model_name, model in fitted_models.items():
-    y_pred = model.predict(X_test)
-    y_proba = model.predict_proba(X_test)[:, 1]
+for name, value in zip(model.metrics_names, results):
+    print(f"{name}: {value:.4f}")
 
-    fpr, tpr, _ = roc_curve(y_test, y_proba)
-    pr_precision, pr_recall, _ = precision_recall_curve(y_test, y_proba)
-    cm = confusion_matrix(y_test, y_pred)
+results = model.evaluate(X_test, y_test, verbose=0, return_dict=True)
 
-    model_metrics[model_name] = {
+print(results)
+
+# %%
+y_prob = model.predict(X_test).ravel()
+y_pred = (y_prob >= 0.5).astype(int)
+
+print("ROC-AUC:", roc_auc_score(y_test, y_prob))
+print("PR-AUC :", average_precision_score(y_test, y_prob))
+
+# %%
+# Write metrics to file for the Streamlit app's Model Results page
+fpr, tpr, _ = roc_curve(y_test, y_prob)
+pr_precision, pr_recall, _ = precision_recall_curve(y_test, y_prob)
+cm = confusion_matrix(y_test, y_pred)
+
+model_metrics = {
+    "Feed-Forward Neural Network": {
         "accuracy": accuracy_score(y_test, y_pred),
         "precision": precision_score(y_test, y_pred),
         "recall": recall_score(y_test, y_pred),
         "f1": f1_score(y_test, y_pred),
-        "auroc": roc_auc_score(y_test, y_proba),
+        "auroc": roc_auc_score(y_test, y_prob),
         "fpr": fpr.tolist(),
         "tpr": tpr.tolist(),
-        "auprc": average_precision_score(y_test, y_proba),
+        "auprc": average_precision_score(y_test, y_prob),
         "precision_curve": pr_precision.tolist(),
         "recall_curve": pr_recall.tolist(),
         "confusion_matrix": cm.tolist(),
     }
+}
 
-pd.DataFrame(model_metrics).T[
-    ["accuracy", "precision", "recall", "f1", "auroc", "auprc"]
-]
-
-# %%
 with open(PROCESSED_DIR / "model_metrics.json", "w") as f:
     json.dump({"models": model_metrics}, f)
-
-# %%
-# Save the selected model (the feed-forward neural network) for the
-# Streamlit predictor page.
-with open(PROCESSED_DIR / "model.pkl", "wb") as f:
-    pickle.dump(fitted_models["Feed-Forward Neural Network"], f)

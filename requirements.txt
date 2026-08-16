@@ -3,10 +3,6 @@ pandas
 numpy
 scipy
 scikit-learn
-lightgbm
-xgboost
-shap
-matplotlib
 plotly
 biopython
 jupyter
@@ -16,4 +12,6 @@ flake8
 ruff
 streamlit
 torch
-transformers
+fair-esm
+tensorflow==2.16.2
+tensorflow-metal==1.2.0; sys_platform == "darwin"

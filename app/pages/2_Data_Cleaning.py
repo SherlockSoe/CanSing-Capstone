@@ -18,10 +18,10 @@ st.set_page_config(page_title="PPI Prediction | Data Cleaning", page_icon="🧬"
 st.title("Data Cleaning")
 
 st.markdown(
-    "The 6,067 candidate proteins are narrowed down by clustering "
-    "near-identical sequences with CD-HIT (40% identity threshold) and "
-    "keeping one representative per cluster — this limits how much "
-    "sequence overlap can leak across the train/test split used later."
+    "The 6,067 candidate proteins are narrowed down to those with both "
+    "sequence data (UniProt) and at least one recorded interaction "
+    "(BioGRID) — proteins with no recorded interactions are dropped "
+    "before building the interaction matrix used for training."
 )
 
 if not CLEANING_SUMMARY_PATH.exists():

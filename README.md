@@ -10,21 +10,10 @@
    pip install -r requirements.txt
    ```
 
-   **macOS only:** `lightgbm` needs the OpenMP runtime, which isn't bundled
-   with the pip package. If you hit `Library not loaded: @rpath/libomp.dylib`,
-   run:
-
-   ```bash
-   brew install libomp
-   ```
-
-   The notebook's data-cleaning step (Section 2) also needs the `cd-hit`
-   binary, which isn't a pip package:
-
-   ```bash
-   brew tap brewsci/bio
-   brew install cd-hit
-   ```
+   `tensorflow` is pinned to `2.16.2` in `requirements.txt` — newer 2.20.x
+   crashes on import in this environment (`mutex lock failed`), and
+   `tensorflow-metal` (Apple GPU acceleration) only pairs reliably with
+   this older release anyway. Don't bump it without checking both.
 
 2. Install the `nbstripout` git filter (**one-time, per clone**). This strips
    notebook cell outputs/execution counts before they're committed, so two
@@ -58,13 +47,13 @@
    root or from `notebooks/`.
 
    **Expect Section 3 (Create Embeddings) to take a while the first time**:
-   it downloads the ESM-2 650M-parameter model (~2.6 GB, one-time,
-   cached by `transformers` afterward) and then embeds every protein —
-   roughly 30-60 minutes on a laptop GPU (Apple Silicon MPS or CUDA); much
-   longer on CPU only. The resulting embeddings are cached to
-   `data/processed/embeddings.pkl`, so re-running the notebook after that
-   point is fast. Section 4 (Train the Model) trains 5 candidate models and
-   typically takes a few more minutes.
+   it downloads the ESM-2 650M-parameter model (~2.6 GB, one-time, cached
+   by `fair-esm` under `~/.cache/torch/hub/checkpoints/` afterward) and
+   then embeds every protein — roughly 30-60 minutes on a laptop GPU
+   (Apple Silicon MPS or CUDA); much longer on CPU only. The resulting
+   embeddings are cached to `data/processed/embeddings.pkl`, so re-running
+   the notebook after that point is fast. Section 4 (Train the Model)
+   trains the feed-forward network and typically takes a few more minutes.
 
 ## Running the GUI
 
@@ -82,19 +71,22 @@ streamlit run app/Home.py
   scripts yet.
 - **Data Cleaning**, **Model Results**, **Predictor** — populate
   automatically once the notebook writes their backing artifacts
-  (`data/processed/cleaning_summary.json`, `model_metrics.json`,
-  `model.pkl`, written by Sections 2, 5, and 5 respectively); until then
-  they show what's still needed. No app changes are required once those
-  exist — see the docstring at the top of each page in `app/pages/` for
-  the exact expected file/field names.
+  (`data/processed/cleaning_summary.json` from Section 2,
+  `data/processed/model.keras` from Section 4, and
+  `data/processed/model_metrics.json` from Section 5); until then they
+  show what's still needed. No app changes are required once those exist
+  — see the docstring at the top of each page in `app/pages/` for the
+  exact expected file/field names.
 
 Shared data-loading and modeling logic (`read_fasta`, `extract_gene_names`,
 `load_biogrid_interactions`, `extract_locuslink`, `get_interactors`,
-`create_embedding`, `create_embeddings_batch`) lives in `src/ppi_utils.py`
-and is imported by both the notebook and the app, so there's one
-implementation to keep correct — in particular, the Predictor page builds
-its feature vector with the exact same `create_embedding` function and
-concatenation order used to train the model in the notebook.
+`get_esm_embedding`, `get_esm_embeddings_batch`, `get_pairwise_features`)
+lives in `src/ppi_utils.py` and is imported by both the notebook and the
+app, so there's one implementation to keep correct — in particular, the
+Predictor page builds its feature vector with the exact same
+`get_esm_embedding`/`get_pairwise_features` functions and pairing scheme
+(absolute difference + element-wise product) used to train the model in
+the notebook.
 
 ## Collaborating on the notebook
 

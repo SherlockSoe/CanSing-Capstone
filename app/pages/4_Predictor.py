@@ -1,18 +1,18 @@
 """Predictor page: given two genes, predict interaction probability.
 
-Expects `data/processed/model.pkl`, written by the notebook's Section 5
-(Evaluate the Model). Uses `read_fasta`/`extract_gene_names`/
-`create_embedding` from `src/ppi_utils.py` — the same embedding function
-used to build the model's training features (feature vector = the two
-proteins' 1280-dim embeddings concatenated into 2560 dims).
+Expects `data/processed/model.keras`, written by the notebook's Section 4
+(Train the Model). Uses `read_fasta`/`extract_gene_names`/
+`get_esm_embedding`/`get_pairwise_features` from `src/ppi_utils.py` — the
+same embedding and feature-pairing functions used to build the model's
+training features (feature vector = the two proteins' 1280-dim embeddings
+paired via absolute-difference + element-wise-product into 2560 dims).
 """
 
-import pickle
 import sys
 from pathlib import Path
 
-import numpy as np
 import streamlit as st
+from tensorflow import keras
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
@@ -20,10 +20,11 @@ sys.path.insert(0, str(REPO_ROOT))
 from src.ppi_utils import (  # noqa: E402
     read_fasta,
     extract_gene_names,
-    create_embedding,
+    get_esm_embedding,
+    get_pairwise_features,
 )
 
-MODEL_PATH = REPO_ROOT / "data" / "processed" / "model.pkl"
+MODEL_PATH = REPO_ROOT / "data" / "processed" / "model.keras"
 FASTA_PATH = (
     REPO_ROOT / "data" / "raw" / "uniprotkb_proteome_UP000002311.fasta"
 )
@@ -33,8 +34,8 @@ st.title("Interaction Predictor")
 
 if not MODEL_PATH.exists():
     st.info(
-        "Not available yet. This page needs the notebook's Section 5 "
-        "(Evaluate the Model) to run first, which writes "
+        "Not available yet. This page needs the notebook's Section 4 "
+        "(Train the Model) to run first, which writes "
         f"`{MODEL_PATH.relative_to(REPO_ROOT)}`."
     )
     st.stop()
@@ -47,8 +48,7 @@ def _load_fasta(path):
 
 @st.cache_resource
 def _load_model(path):
-    with open(path, "rb") as f:
-        return pickle.load(f)
+    return keras.models.load_model(path)
 
 
 fasta_data = _load_fasta(FASTA_PATH)
@@ -62,8 +62,8 @@ gene_b = col2.selectbox("Protein B", gene_options)
 
 if st.button("Predict"):
     with st.spinner("Generating embeddings and predicting..."):
-        embedding_a = create_embedding(seq_dic[gene_a])
-        embedding_b = create_embedding(seq_dic[gene_b])
-        features = np.concatenate([embedding_a, embedding_b])
-        probability = model.predict_proba([features])[0][1]
+        embedding_a = get_esm_embedding(seq_dic[gene_a])
+        embedding_b = get_esm_embedding(seq_dic[gene_b])
+        features = get_pairwise_features(embedding_a, embedding_b)
+        probability = model.predict(features[None, :])[0][0]
     st.metric("Predicted interaction probability", f"{probability:.1%}")
