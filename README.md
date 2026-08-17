@@ -127,6 +127,34 @@ ruff check --fix scripts/ src/ app/ notebooks/CapstoneNoteBookMain.py
 Then run `jupytext --sync notebooks/CapstoneNoteBookMain.ipynb` to carry the
 fixes from the `.py` mirror back into the notebook.
 
+## Data access and licensing
+
+Raw data is not committed to this repo (see step 3 above) — it's fetched
+on demand from the original sources:
+
+- **UniProt** (`scripts/download_uniprot.py`) — S. cerevisiae S288c
+  reference proteome (`UP000002311`), streamed from the UniProt REST API.
+  Owned/maintained by the UniProt Consortium (EMBL-EBI, SIB, PIR) and
+  distributed under the [Creative Commons Attribution 4.0 International
+  (CC BY 4.0) License](https://www.uniprot.org/help/license) — reuse is
+  permitted with attribution.
+- **BioGRID** (`scripts/download_biogrid.py`) — S. cerevisiae S288c
+  protein-protein interaction data, release `5.0.259`, from the BioGRID
+  release archive. Copyright Mike Tyers / TyersLab.com, distributed under
+  the [MIT License](https://wiki.thebiogrid.org/doku.php/terms_and_conditions)
+  — the copyright and permission notice must be retained in any copy or
+  substantial portion of the data.
+
+Both sources' terms should be reviewed directly before any redistribution
+beyond this project.
+
+## Attributions
+
+- ESM2 model loading and embedding extraction in `src/ppi_utils.py`
+  (`_load_esm_model`, `get_esm_embedding`, `get_esm_embeddings_batch`,
+  `_mean_pool_residues`) was adapted from the [ESM2-Tutorial
+  repository](https://github.com/ProteinVision/ESM2-Tutorial/blob/main/ESM2.ipynb).
+
 ## Project structure
 
 ```

@@ -74,7 +74,13 @@ def get_interactors(bg, protein_id):
 
 
 def _load_esm_model():
-    """Lazily load the ESM2 model/alphabet once, cached at module scope."""
+    """Lazily load the ESM2 model/alphabet once, cached at module scope.
+
+    Model loading and embedding extraction (this function, plus
+    `get_esm_embedding` / `get_esm_embeddings_batch` / `_mean_pool_residues`
+    below) were adapted from the ESM2-Tutorial repository:
+    https://github.com/ProteinVision/ESM2-Tutorial/blob/main/ESM2.ipynb
+    """
     if not _esm_state:
         if torch.cuda.is_available():
             device = "cuda"

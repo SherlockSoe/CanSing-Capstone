@@ -20,7 +20,8 @@
 #
 #
 # ### Standard Amino Acids
-# FASTA represents each amino acid with a single character as follows:
+# The FASTA data format represents each amino acid with a single
+# character as follows:
 #
 # | 1-Letter Code | 3-Letter Code | Amino Acid Name |
 # |---|---|---|
@@ -46,8 +47,8 @@
 # | Y | Tyr | Tyrosine |
 #
 # ### Ambiguous & Special Characters
-# FASTA also uses the following abbreviations for ambiguous amino acid
-# identification and special characters:
+# The FASTA format also uses the following abbreviations for ambiguous
+# amino acid identification and special characters:
 #
 # | 1-Letter Code | Description / Meaning |
 # |---|---|
@@ -175,7 +176,7 @@ def random_protein(length):
 # # Section 1 - Data Import
 #
 # In this section we are importing amino acid sequences for all 6,067
-# amino acids in S. cerevisiae.
+# amino acids in S. cerevisiae, and interaction data from BioGrid.
 
 # %%
 # Import dataset
@@ -218,7 +219,7 @@ print(bg.shape)
 bg.head()
 
 # %%
-# Check the Biogrid data at a particular location
+# Check the Biogrid data at a particular dataframe location
 print(bg.at[1, "Alt IDs Interactor A"])
 
 # %%
@@ -312,7 +313,7 @@ interaction_dictionary_filtered
 # %%
 # Finally we create the overall interaction matrix using the interaction
 # dictionary - a square matrix with 1's indicating interactions, 0's
-# indicating no interaction
+# indicating no interaction. Note that this is a symmetric matrix.
 
 # We will call this the 'Master Interaction Matrix' or MIM
 MIM = pd.DataFrame(0, index=new_gene_list, columns=new_gene_list)
@@ -474,7 +475,8 @@ embedding_dict
 # %% [markdown]
 # # Section 4 - Train the Model
 #
-# In this section we begin training our NN model
+# In this section we begin training our feed-forward neural network
+# (a multi-layer perceptron).
 
 # %%
 # First we need to create a test/train split
