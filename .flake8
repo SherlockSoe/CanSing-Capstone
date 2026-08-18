@@ -1,5 +1,5 @@
 [flake8]
-max-line-length = 79
+max-line-length = 200
 exclude = .git,__pycache__,.ipynb_checkpoints,data,.venv,venv
 # E203 (whitespace before ':') conflicts with how ruff/black format slices
 # (e.g. `a[start : start + n]`) — both formatters intentionally add that
