@@ -46,6 +46,29 @@
    the notebook after that point is fast. Section 4 (Train the Model)
    trains the feed-forward network and typically takes a few more minutes.
 
+## Long-running cells (`CELL_TAKE_TIME`)
+
+Three cells in the notebook are marked with a `# CELL_TAKE_TIME` comment
+because they're expensive to (re-)run — the interaction lookup takes a
+few minutes, the embedding cells 30-60+ minutes each depending on
+hardware (see step 3 above). Each writes its result to a pickle in
+`data/processed/`, and the very next cell loads that pickle back with
+`pickle.load` instead of recomputing:
+
+| `CELL_TAKE_TIME` cell builds... | ...and writes | which is loaded by |
+|---|---|---|
+| the BioGRID gene-interaction dictionary (`get_interactors` over every gene in `gene_list`) | `data/processed/interactions.pkl` | the next cell |
+| ESM2 embeddings for every protein using the full 650M-parameter model (`esm2_t33_650M_UR50D`) | `data/processed/embeddings.pkl` | the next cell |
+| ESM2 embeddings for every protein using the smaller 8M-parameter model (`esm2_t6_8M_UR50D`), used for the model-size comparison in the results section | `data/processed/embeddings_small.pkl` | the next cell |
+
+All three `.pkl` files are already committed to the repo, so on a fresh
+clone none of these cells need to run — they're commented out by default
+and the notebook just loads the existing files. Only uncomment and re-run
+one if you've changed the upstream data (new BioGRID/UniProt download) or
+the extraction logic (`get_interactors`/`get_esm_embedding` in
+`src/ppi_utils.py`) and need to regenerate it — delete or rename the
+corresponding `.pkl` first so a stale file can't get loaded by mistake.
+
 ## Running the GUI
 
 The project includes a Streamlit app (`app/`) that presents the report's
@@ -136,7 +159,7 @@ beyond this project.
 ```
 app/              Streamlit GUI (streamlit run app/Home.py)
 data/raw/         Downloaded source data (gitignored, populate via scripts/)
-data/processed/   Generated intermediate artifacts, e.g. interactions.pkl (gitignored)
+data/processed/   Generated intermediate artifacts (interactions.pkl, embeddings*.pkl, etc.) — committed to the repo
 notebooks/        Analysis and modeling notebook
 scripts/          Data-download scripts
 src/              Shared data-loading logic, imported by both the notebook and app/
