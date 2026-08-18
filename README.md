@@ -15,16 +15,7 @@
    `tensorflow-metal` (Apple GPU acceleration) only pairs reliably with
    this older release anyway. Don't bump it without checking both.
 
-2. Install the `nbstripout` git filter (**one-time, per clone**). This strips
-   notebook cell outputs/execution counts before they're committed, so two
-   people editing the notebook don't generate noisy diffs or merge conflicts
-   from stale output cells:
-
-   ```bash
-   nbstripout --install --attributes .gitattributes
-   ```
-
-3. Download the raw data. These files are too large to commit to GitHub, so
+2. Download the raw data. These files are too large to commit to GitHub, so
    they're gitignored (`data/raw/`) and fetched on demand via the scripts in
    `scripts/`:
 
@@ -36,7 +27,7 @@
    Both scripts save their output into `data/raw/` under fixed filenames, so
    the notebook finds them the same way on every machine.
 
-4. Launch the notebook:
+3. Launch the notebook:
 
    ```bash
    jupyter notebook notebooks/CapstoneNoteBookMain.ipynb
@@ -90,42 +81,27 @@ the notebook.
 
 ## Collaborating on the notebook
 
-- **Outputs are stripped automatically.** `nbstripout` (step 2 above) removes
-  cell outputs/execution counts at commit time via a git filter, so `git diff`
-  and PR reviews only show real code changes, not re-run noise. Your working
-  copy still shows outputs locally — only what gets committed is stripped.
-- **Review changes as plain Python.** The notebook is paired with
-  `notebooks/CapstoneNoteBookMain.py` via `jupytext` (in percent-cell
-  format). Both files are kept in sync automatically whenever you save the
-  notebook in Jupyter (or run `jupytext --sync notebooks/CapstoneNoteBookMain.ipynb`
-  from the CLI). The `.py` file is what's actually easy to diff and merge on
-  GitHub — prefer resolving merge conflicts there, then run `jupytext --sync`
-  to bring the `.ipynb` back in line.
 - **Avoid parallel edits to the same cells** where possible — `.ipynb` merge
-  conflicts are still harder to resolve than plain-text ones even with the
-  tooling above.
+  conflicts are harder to resolve than plain-text ones, since the file
+  format includes cell outputs and execution counts alongside the code.
 
 ## Code style
 
-The project's Python code — `scripts/*.py`, `src/*.py`, `app/`, and the
-notebook's `jupytext` mirror, `notebooks/CapstoneNoteBookMain.py` — is
+The project's Python code — `scripts/*.py`, `src/*.py`, `app/` — is
 checked against PEP-8 with `flake8` (79-char line length, configured in
 `.flake8`). Before submitting or opening a PR, verify it's clean:
 
 ```bash
-flake8 scripts/ src/ app/ notebooks/CapstoneNoteBookMain.py
+flake8 scripts/ src/ app/
 ```
 
 No output means no violations. If you need to fix something, `ruff` (already
 in `requirements.txt`, configured in `ruff.toml`) auto-fixes most of it:
 
 ```bash
-ruff format scripts/ src/ app/ notebooks/CapstoneNoteBookMain.py
-ruff check --fix scripts/ src/ app/ notebooks/CapstoneNoteBookMain.py
+ruff format scripts/ src/ app/
+ruff check --fix scripts/ src/ app/
 ```
-
-Then run `jupytext --sync notebooks/CapstoneNoteBookMain.ipynb` to carry the
-fixes from the `.py` mirror back into the notebook.
 
 ## Data access and licensing
 
@@ -161,7 +137,7 @@ beyond this project.
 app/              Streamlit GUI (streamlit run app/Home.py)
 data/raw/         Downloaded source data (gitignored, populate via scripts/)
 data/processed/   Generated intermediate artifacts, e.g. interactions.pkl (gitignored)
-notebooks/        Analysis and modeling notebook (paired .ipynb + .py via jupytext)
+notebooks/        Analysis and modeling notebook
 scripts/          Data-download scripts
 src/              Shared data-loading logic, imported by both the notebook and app/
 ```

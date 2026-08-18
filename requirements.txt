@@ -5,8 +5,6 @@ scikit-learn
 plotly
 biopython
 jupyter
-jupytext
-nbstripout
 flake8
 ruff
 streamlit

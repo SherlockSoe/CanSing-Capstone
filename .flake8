@@ -6,8 +6,3 @@ exclude = .git,__pycache__,.ipynb_checkpoints,data,.venv,venv
 # space per PEP 8's own "binary operator" guidance; flake8/pycodestyle just
 # disagrees. Standard to ignore this one when using a black-style formatter.
 extend-ignore = E203
-# Notebook cells naturally interleave imports with code (e.g. a repo-root
-# bootstrap cell must run before `src` is importable), unlike a normal
-# top-to-bottom script.
-per-file-ignores =
-    notebooks/CapstoneNoteBookMain.py:E402
