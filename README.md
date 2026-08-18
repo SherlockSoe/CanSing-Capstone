@@ -69,38 +69,10 @@ the extraction logic (`get_interactors`/`get_esm_embedding` in
 `src/ppi_utils.py`) and need to regenerate it — delete or rename the
 corresponding `.pkl` first so a stale file can't get loaded by mistake.
 
-## Running the GUI
-
-The project includes a Streamlit app (`app/`) that presents the report's
-narrative, dataset stats, data-cleaning Sankey diagram, model comparison
-results, and an interactive predictor. Run it from the repo root:
-
-```bash
-streamlit run app/Home.py
-```
-
-- **Home** — project background.
-- **Data Overview** — real numbers from the downloaded UniProt/BioGRID data
-  (step 3 above); shows a setup reminder if you haven't run the download
-  scripts yet.
-- **Data Cleaning**, **Model Results**, **Predictor** — populate
-  automatically once the notebook writes their backing artifacts
-  (`data/processed/cleaning_summary.json` from Section 2,
-  `data/processed/model.keras` from Section 4, and
-  `data/processed/model_metrics.json` from Section 5); until then they
-  show what's still needed. No app changes are required once those exist
-  — see the docstring at the top of each page in `app/pages/` for the
-  exact expected file/field names.
-
 Shared data-loading and modeling logic (`read_fasta`, `extract_gene_names`,
 `load_biogrid_interactions`, `extract_locuslink`, `get_interactors`,
 `get_esm_embedding`, `get_esm_embeddings_batch`, `get_pairwise_features`)
-lives in `src/ppi_utils.py` and is imported by both the notebook and the
-app, so there's one implementation to keep correct — in particular, the
-Predictor page builds its feature vector with the exact same
-`get_esm_embedding`/`get_pairwise_features` functions and pairing scheme
-(absolute difference + element-wise product) used to train the model in
-the notebook.
+lives in `src/ppi_utils.py` and is imported by the notebook.
 
 ## Collaborating on the notebook
 
@@ -110,20 +82,20 @@ the notebook.
 
 ## Code style
 
-The project's Python code — `scripts/*.py`, `src/*.py`, `app/` — is
+The project's Python code — `scripts/*.py`, `src/*.py` — is
 checked against PEP-8 with `flake8` (79-char line length, configured in
 `.flake8`). Before submitting or opening a PR, verify it's clean:
 
 ```bash
-flake8 scripts/ src/ app/
+flake8 scripts/ src/
 ```
 
 No output means no violations. If you need to fix something, `ruff` (already
 in `requirements.txt`, configured in `ruff.toml`) auto-fixes most of it:
 
 ```bash
-ruff format scripts/ src/ app/
-ruff check --fix scripts/ src/ app/
+ruff format scripts/ src/
+ruff check --fix scripts/ src/
 ```
 
 ## Data access and licensing
@@ -157,10 +129,9 @@ beyond this project.
 ## Project structure
 
 ```
-app/              Streamlit GUI (streamlit run app/Home.py)
 data/raw/         Downloaded source data (gitignored, populate via scripts/)
 data/processed/   Generated intermediate artifacts (interactions.pkl, embeddings*.pkl, etc.) — committed to the repo
 notebooks/        Analysis and modeling notebook
 scripts/          Data-download scripts
-src/              Shared data-loading logic, imported by both the notebook and app/
+src/              Shared data-loading logic, imported by the notebook
 ```
